@@ -2,10 +2,12 @@ package main
 
 import (
 	"database/sql"
+	"encoding/csv"
 	"encoding/json"
-	"fmt"
 	"log"
-	"sort"
+	"net/http"
+	"os"
+	"strconv"
 
 	_ "modernc.org/sqlite"
 )
@@ -21,44 +23,31 @@ func main() {
 	handle(err, "open db")
 	defer db.Close()
 
-	rows, err := db.Query(`SELECT all_byte, headers_json FROM stage2 WHERE scheme = 'https';`)
+	f, err := os.Create("dump.csv")
+	handle(err, "create dump.csv")
+	defer f.Close()
+	w := csv.NewWriter(f)
+	w.Write([]string{"hostname", "scheme", "dns_ns", "first_ns", "all_ns", "all_byte", "Server", "X-Served-By", "Content-Type"})
+
+	rows, err := db.Query(`SELECT hostname, scheme, dns_ns, first_ns, all_ns, all_byte, headers_json, body FROM stage2;`)
 	handle(err, "query 1")
 
-	var sizes []int
-	headerCount := make(map[string]int)
 	for rows.Next() {
-		var size int
-		var rawHeader string
-		err = rows.Scan(&size, &rawHeader)
+		var hostname, scheme, headersJSON, body string
+		var dnsNs, firstNs, allNs, allBytes int64
+		err = rows.Scan(&hostname, &scheme, &dnsNs, &firstNs, &allNs, &allBytes, &headersJSON, &body)
 		handle(err, "scan 1")
-		sizes = append(sizes, size)
-		var header map[string][]string
-		err = json.Unmarshal([]byte(rawHeader), &header)
-		handle(err, "unmarshal header")
-		for key := range header {
-			headerCount[key]++
-		}
-	}
+		m := make(map[string][]string)
+		err = json.Unmarshal([]byte(headersJSON), &m)
+		handle(err, "unmarshal header json")
 
-	var headerOut []struct {
-		string
-		int
-	}
-	for k, v := range headerCount {
-		headerOut = append(headerOut, struct {
-			string
-			int
-		}{k, v})
-	}
-	sort.Slice(headerOut, func(i, j int) bool { return headerOut[i].int < headerOut[j].int })
-	for _, h := range headerOut {
-		fmt.Println(h.int, h.string)
-	}
+		hm := http.Header(m)
 
-	var totalSize int
-	for _, s := range sizes {
-		totalSize += s
+		w.Write([]string{
+			hostname, scheme,
+			strconv.FormatInt(dnsNs, 10), strconv.FormatInt(firstNs, 10),
+			strconv.FormatInt(allNs, 10), strconv.FormatInt(allBytes, 10),
+			hm.Get("server"), hm.Get("X-Served-By"), hm.Get("Content-Type"),
+		})
 	}
-
-	fmt.Println("avg size", totalSize/len(sizes))
 }

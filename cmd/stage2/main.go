@@ -106,15 +106,16 @@ func worker(wg *sync.WaitGroup, work chan string, results chan Result) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 
 	for host := range work {
-		r, err := do(tr, "http", host)
-		if err != nil {
-			log.Println("http", host, err)
-		} else {
-			results <- r
-		}
-		r, err = do(tr, "https", host)
+		r, err := do(tr, "https", host)
 		if err != nil {
 			log.Println("https", host, err)
+		} else {
+			results <- r
+			continue
+		}
+		r, err = do(tr, "http", host)
+		if err != nil {
+			log.Println("http", host, err)
 		} else {
 			results <- r
 		}
